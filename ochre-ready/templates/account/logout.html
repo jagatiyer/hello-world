@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+
+<div class="contact-page">
+  <div class="contact-container">
+
+    <div class="contact-left">
+
+      <p class="contact-label">
+        <span class="dash">—</span> ACCOUNT <span class="dash">—</span>
+      </p>
+
+      <h1>Sign Out</h1>
+
+      <p class="contact-description">
+        Are you sure you want to sign out of your account?
+      </p>
+
+      <div class="contact-form-section">
+        <form class="contact-form" method="POST" action="{% url 'account_logout' %}">
+          {% csrf_token %}
+          <button type="submit" class="cn">SIGN OUT</button>
+        </form>
+
+        <p style="margin-top:16px;">
+          <a href="{% url 'home' %}">Cancel and return home</a>
+        </p>
+      </div>
+
+    </div>
+
+    <div class="contact-right">
+      <h3 class="contact-right-title">You’re always welcome back</h3>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}
+

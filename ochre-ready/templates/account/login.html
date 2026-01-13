@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<main class="auth-page">
+  <div class="auth-card">
+
+    <header class="auth-card-header">
+      <p class="craft-spirits"><span class="dash">—</span>ACCOUNT<span class="dash">—</span></p>
+      <h1 class="auth-title">Sign In</h1>
+      <p class="auth-sub">Access your account to continue.</p>
+    </header>
+
+    <form method="post" action="{% url 'account_login' %}" class="auth-form">
+      {% csrf_token %}
+
+      {% if next %}
+        <input type="hidden" name="next" value="{{ next }}">
+      {% endif %}
+
+      {{ form.non_field_errors }}
+
+      <div class="form-row">
+        {{ form.login }}
+      </div>
+
+      <div class="form-row">
+        {{ form.password }}
+      </div>
+
+      <button type="submit" class="cn auth-btn">Sign In</button>
+    </form>
+
+    <div style="margin-top:20px; text-align:center;">
+      <a href="{% url 'account_signup' %}" class="auth-link">
+        New here? Create an account
+      </a>
+    </div>
+
+  </div>
+</main>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<main class="auth-page">
+  <div class="auth-card">
+
+    <header class="auth-card-header">
+      <p class="craft-spirits">
+        <span class="dash">—</span>ACCOUNT<span class="dash">—</span>
+      </p>
+      <h1 class="auth-title">Edit Profile</h1>
+      <p class="auth-sub">Update your name and email.</p>
+    </header>
+
+    <div class="auth-body">
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="toast-msg {{ message.tags }}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <!-- ✅ CANONICAL AUTH FORM -->
+      <form method="post"
+            action="{% url 'users:profile_edit' %}"
+            class="auth-form"
+            style="max-width:700px; margin: 0 auto;">
+
+        {% csrf_token %}
+
+        {% for field in form %}
+          <div class="form-row">
+            <label for="{{ field.id_for_label }}" class="field-label">
+              {{ field.label }}
+            </label>
+
+            {{ field }}
+
+            {% if field.help_text %}
+              <p class="field-help">{{ field.help_text|safe }}</p>
+            {% endif %}
+
+            {% if field.errors %}
+              <p class="field-error">{{ field.errors|striptags }}</p>
+            {% endif %}
+          </div>
+        {% endfor %}
+
+        <div class="form-actions">
+          <button type="submit" class="cn auth-btn">
+            Save changes
+          </button>
+
+          <a href="{% url 'users:profile' %}" class="auth-link">
+            Cancel
+          </a>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</main>
+{% endblock %}

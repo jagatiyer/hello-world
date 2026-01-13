@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+
+<div class="blog-page">
+
+  <!-- =========================
+       PAGE HEADER
+       ========================= -->
+  <div class="blog-header">
+    <p class="blog-stories">
+      <span class="dash">—</span>BLOG<span class="dash">—</span>
+    </p>
+
+    <h1>Stories & Insights</h1>
+
+    <p class="description">
+      Craft, clarity and conversations around spirits and culture.
+    </p>
+    
+    <!-- Categories (filters) -->
+    <div class="article-filters" aria-label="category-filters">
+      <!-- Permanent ALL filter (always visible). Active when no filter or filter=all -->
+      <a
+        href="?filter=all"
+        class="filter-btn {% if active_filter == 'all' %}active{% endif %}">
+        ALL
+      </a>
+      {% for value,label in tags %}
+        <a href="?filter={{ value }}" class="filter-btn {% if active_filter == value %}active{% endif %}">{{ label|upper }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+
+  <!-- =========================
+       BLOG GRID
+       ========================= -->
+  <div class="blog-grid" id="blog-grid">
+
+    {% load blog_extras %}
+    {% for post in posts %}
+      <div class="article-card">
+
+        {% if post.cover_image %}
+          <img src="{{ post.cover_image.url }}" alt="{{ post.title }}" class="shop-card-img">
+        {% else %}
+          {% first_image_src post.content as first_img %}
+          {% if first_img %}
+            <img src="{{ first_img }}" alt="{{ post.title }}" class="shop-card-img">
+          {% endif %}
+        {% endif %}
+
+        <h3>{{ post.title }}</h3>
+
+        {% if post.excerpt %}
+          <p>{{ post.excerpt }}</p>
+        {% endif %}
+
+        <a href="{% url 'blog:blog_detail' post.slug %}"
+           class="collection-card-btn">
+          Read Article →
+        </a>
+
+      </div>
+    {% endfor %}
+
+  </div>
+
+
+  <!-- =========================
+       LOAD MORE
+       ========================= -->
+  {% if total_count > posts|length %}
+    <div class="load-more-wrap">
+      <button
+        id="load-more-btn"
+        class="load-more-btn cn collections"
+        data-offset="{{ posts|length }}">
+        Show More
+      </button>
+    </div>
+  {% endif %}
+
+</div>
+
+
+<!-- =========================
+     LOAD MORE JS (PLAIN JS)
+     ========================= -->
+<script>
+(function () {
+  const btn = document.getElementById("load-more-btn");
+  if (!btn) return;
+
+  const grid = document.getElementById("blog-grid");
+
+  btn.addEventListener("click", function () {
+    const offset = parseInt(btn.dataset.offset, 10);
+
+    fetch(`/blog/load-more/?offset=${offset}`)
+      .then(res => res.json())
+      .then(data => {
+
+        data.posts.forEach(post => {
+          const html = `
+            <div class="article-card">
+              ${post.image ? `<img src="${post.image}" class="shop-card-img" />` : ""}
+              <h3>${post.title}</h3>
+              ${post.excerpt ? `<p>${post.excerpt}</p>` : ""}
+              <a href="/blog/${post.slug}/" class="collection-card-btn">
+                Read Article →
+              </a>
+            </div>
+          `;
+          grid.insertAdjacentHTML("beforeend", html);
+        });
+
+        btn.dataset.offset = data.next_offset;
+
+        if (!data.has_more) {
+          btn.remove();
+        }
+      })
+      .catch(err => console.error("Load more failed", err));
+  });
+})();
+</script>
+
+{% endblock %}

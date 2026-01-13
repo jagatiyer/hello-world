@@ -2,7 +2,7 @@
 
 ## 📦 What's Here
 
-The `ochre-complete-project/` folder contains your COMPLETE ochre project with ALL L1 changes integrated and ready to run.
+The `ochre-ready/` folder contains your COMPLETE ochre project with ALL L1 changes integrated and ready to run.
 
 ## 🚀 Simple 4-Step Testing
 
@@ -15,7 +15,7 @@ git checkout claude/setup-django-project-LNfEV
 
 ### Step 2: Go Into the Ochre Project
 ```bash
-cd ochre-complete-project
+cd ochre-ready
 ```
 
 ### Step 3: Setup & Install
@@ -47,7 +47,7 @@ Open your browser:
 
 ## 📖 Full Documentation
 
-See `ochre-complete-project/L1_CHANGES_README.md` for:
+See `ochre-ready/L1_CHANGES_README.md` for:
 - Complete testing guide
 - How to test booking form
 - What changed in each file

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+.env
+
+# Django
+db.sqlite3
+staticfiles/
+media/
+
+
+# Archives
+*.zip
+
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Ignore generated vendor static assets
+static/vendor/
+

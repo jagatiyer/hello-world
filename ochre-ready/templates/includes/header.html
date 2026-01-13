@@ -1,0 +1,121 @@
+{# templates/includes/header.html #}
+{% load static %}
+{% with current=request.resolver_match.url_name %}
+
+<nav class="navbar" role="navigation" aria-label="Main navigation">
+  <div class="nav-left icon">
+    <a href="{% url 'home' %}" class="logo-link" aria-label="Home">
+      <h2 class="logo">OCH<span class="highlight-r">R</span>E</h2>
+    </a>
+  </div>
+
+  <!-- Mobile hamburger: visible only on small screens via CSS -->
+  <button id="mobile-nav-toggle" class="mobile-nav-toggle" aria-controls="main-menu" aria-expanded="false" aria-label="Open navigation">
+    <span class="sr-only">Open navigation</span>
+    <i class="fa fa-bars" aria-hidden="true"></i>
+  </button>
+
+  <div class="menu" id="main-menu" aria-hidden="true">
+    <ul class="nav-menu" role="menubar">
+
+      <li>
+        <a href="{% url 'home' %}" class="{% if current == 'home' %}active{% endif %}">
+          HOME
+        </a>
+      </li>
+
+      <li>
+        <a href="{% url 'collections_app:collections_index' %}"
+           class="{% if current == 'collections_index' %}active{% endif %}">
+          COLLECTIONS
+        </a>
+      </li>
+
+      <li>
+        <a href="{% url 'commercials_index' %}"
+           class="{% if current == 'commercials_index' %}active{% endif %}">
+          COMMERCIALS
+        </a>
+      </li>
+
+      <!-- STORY removed from top-level nav—available under MEDIA dropdown only -->
+
+      <li class="nav-dropdown-wrapper">
+        <div class="nav-dropdown" id="media-dropdown-wrapper">
+          <button id="media-toggle" class="nav-link nav-dropdown-toggle {% if current == 'media_index' or current == 'blog_list' or current == 'story_page' %}active{% endif %}" aria-haspopup="true" aria-expanded="false">
+            MEDIA
+            <i class="fa fa-chevron-down" aria-hidden="true" style="margin-left:8px;font-size:12px;"></i>
+          </button>
+
+          <div id="media-dropdown" class="nav-dropdown-menu" aria-hidden="true" role="menu">
+            <a role="menuitem" href="{% url 'mediahub:media_index' %}" class="dropdown-item {% if current == 'media_index' %}active{% endif %}">Media</a>
+            <a role="menuitem" href="{% url 'blog:blog_list' %}" class="dropdown-item {% if current == 'blog_list' %}active{% endif %}">Blog</a>
+            <a role="menuitem" href="{% url 'story:story_page' %}" class="dropdown-item {% if current == 'story_page' %}active{% endif %}">Story</a>
+          </div>
+        </div>
+      </li>
+
+      <li>
+        <a href="{% url 'society' %}" class="{% if current == 'society' %}active{% endif %}">
+          SOCIETY
+        </a>
+      </li>
+
+      <li>
+        <a href="{% url 'shop:shop_index' %}"
+           class="{% if current == 'shop_index' %}active{% endif %}">
+          SHOP
+        </a>
+      </li>
+
+      <li class="nav-icons">
+
+        {% if user.is_authenticated %}
+
+          <div class="user-dropdown-wrapper">
+            <button id="user-toggle" class="icon-link user-toggle">
+              <i class="fa-regular fa-user"></i>
+            </button>
+
+            <div id="user-dropdown" class="user-dropdown" aria-hidden="true">
+              <div class="dropdown-header">
+                <span class="u-name">{{ user.first_name|default:user.username }}</span>
+                <span class="u-email">{{ user.email }}</span>
+              </div>
+
+              <a href="{% url 'users:profile' %}" class="dropdown-item">Profile</a>
+
+              <form method="post" action="{% url 'account_logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="logout-btn">Logout</button>
+              </form>
+            </div>
+          </div>
+
+        {% else %}
+          <a href="{% url 'account_login' %}" class="icon-link">
+            <i class="fa-regular fa-user"></i>
+          </a>
+        {% endif %}
+
+        {# ✅ FIXED CART LINK #}
+        <a href="{% url 'shop:cart_view' %}?next={% url 'shop:cart_view' %}"
+           class="icon-link cart-link"
+           aria-label="Cart">
+          <i class="fa fa-shopping-cart cart-icon"></i>
+          <span class="cart-badge"
+                aria-hidden="{% if cart_count %}false{% else %}true{% endif %}">
+            {{ cart_count|default:0 }}
+          </span>
+        </a>
+
+      </li>
+
+    </ul>
+  </div>
+</nav>
+
+<!-- mobile nav overlay (dimming background) -->
+<div id="mobile-nav-overlay" class="mobile-nav-overlay" tabindex="-1" aria-hidden="true"></div>
+
+{% endwith %}
