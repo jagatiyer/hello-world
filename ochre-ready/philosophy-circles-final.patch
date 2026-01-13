@@ -1,0 +1,38 @@
+From f9b529250442482a88a9bf2f779c9324f2238eb8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Jan 2026 19:40:03 +0000
+Subject: [PATCH] Add philosophy circle color styles (red, green, orange)
+
+---
+ ochre-ready/static/style.css | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/ochre-ready/static/style.css b/ochre-ready/static/style.css
+index fad6d9b..eb47838 100644
+--- a/ochre-ready/static/style.css
++++ b/ochre-ready/static/style.css
+@@ -1958,6 +1958,21 @@ header, .site-header { margin-bottom: 24px !important; }
+   font-size: 28px;
+ }
+ 
++.philosophy-number.red {
++  background: rgba(255, 91, 95, 0.15);
++  color: #ff5b5f;
++}
++
++.philosophy-number.green {
++  background: rgba(0, 210, 199, 0.15);
++  color: #00d2c7;
++}
++
++.philosophy-number.orange {
++  background: rgba(255, 114, 0, 0.15);
++  color: #ff7200;
++}
++
+ .story-journey {
+   padding: 60px 20px 100px;
+   text-align: center;
+-- 
+2.43.0
+
