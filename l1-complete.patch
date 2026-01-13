@@ -1,0 +1,892 @@
+From d394012f697f4f669dfa4e37020c7a872fcb7576 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Jan 2026 15:38:06 +0000
+Subject: [PATCH 1/5] Add L1 requirements: Enhanced booking form, email
+ notifications, and timeline fixes
+
+Changes:
+
+1. Contact Form Email Notifications (contact/views.py)
+- Added email notification to admin when contact form is submitted
+- Saves to database AND sends email
+- Uses fail_silently=True to prevent form errors if email fails
+
+2. Story Page Timeline Fix (templates/story/story_page.html)
+- Fixed timeline structure by removing non-existent timeline-year divs
+- Moved year into h3 heading to match existing CSS grid structure
+- Uses existing CSS classes only
+
+3. Enhanced Experience Booking Form (shop/)
+- Added new fields to ExperienceBooking model
+- Created shop/forms.py with ExperienceBookingForm
+- Updated shop/views.py booking logic with email notifications
+
+4. Email Configuration (ochre/settings.py)
+- Added EMAIL_BACKEND, DEFAULT_FROM_EMAIL, CONTACT_EMAIL
+
+5. Database Migration
+- Created migration 0003 for new ExperienceBooking fields
+---
+ contact/views.py                              |  33 ++++-
+ ochre/settings.py                             |   9 ++
+ shop/forms.py                                 |  73 +++++++++++
+ ...encebooking_agreement_accepted_and_more.py |  53 ++++++++
+ shop/models.py                                |  11 ++
+ shop/views.py                                 | 120 +++++++++++++++---
+ templates/story/story_page.html               |  11 +-
+ 7 files changed, 281 insertions(+), 29 deletions(-)
+ create mode 100644 shop/forms.py
+ create mode 100644 shop/migrations/0003_experiencebooking_agreement_accepted_and_more.py
+
+diff --git a/contact/views.py b/contact/views.py
+index c96a9c0..162b823 100644
+--- a/contact/views.py
++++ b/contact/views.py
+@@ -1,5 +1,7 @@
+ from django.shortcuts import render, redirect
+ from django.contrib import messages
++from django.core.mail import send_mail
++from django.conf import settings
+ from .models import ContactSubmission
+ 
+ 
+@@ -12,7 +14,7 @@ def contact_page(request):
+         message = request.POST.get("message", "").strip()
+ 
+         # Save to DB
+-        ContactSubmission.objects.create(
++        submission = ContactSubmission.objects.create(
+             name=name,
+             email=email,
+             phone=phone,
+@@ -20,6 +22,35 @@ def contact_page(request):
+             message=message,
+         )
+ 
++        # Send email notification to admin
++        try:
++            admin_email = getattr(settings, 'CONTACT_EMAIL', settings.DEFAULT_FROM_EMAIL)
++            email_subject = f'New Contact Form Submission: {subject or "No Subject"}'
++            email_body = f"""
++New contact form submission received:
++
++Name: {name}
++Email: {email}
++Phone: {phone}
++Subject: {subject}
++
++Message:
++{message}
++
++---
++Submission ID: {submission.id}
++Submitted at: {submission.created_at.strftime('%Y-%m-%d %H:%M:%S')}
++"""
++            send_mail(
++                subject=email_subject,
++                message=email_body,
++                from_email=settings.DEFAULT_FROM_EMAIL,
++                recipient_list=[admin_email],
++                fail_silently=True,
++            )
++        except Exception as e:
++            print(f"Email sending failed: {e}")
++
+         # Success toast
+         messages.success(request, "Message Sent Successfully!")
+ 
+diff --git a/ochre/settings.py b/ochre/settings.py
+index 837ed2e..0794828 100644
+--- a/ochre/settings.py
++++ b/ochre/settings.py
+@@ -250,6 +250,15 @@ SOCIALACCOUNT_PROVIDERS = {
+ }
+ 
+ 
++# ============================================================
++# EMAIL CONFIGURATION
++# ============================================================
++
++EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
++DEFAULT_FROM_EMAIL = 'noreply@ochrespirits.com'
++CONTACT_EMAIL = 'info@ochrespirits.com'
++
++
+ # ============================================================
+ # DEFAULTS
+ # ============================================================
+diff --git a/shop/forms.py b/shop/forms.py
+new file mode 100644
+index 0000000..048bff6
+--- /dev/null
++++ b/shop/forms.py
+@@ -0,0 +1,73 @@
++from django import forms
++from .models import ExperienceBooking
++
++
++TIME_SLOT_CHOICES = [
++    ('', 'Select a time slot'),
++    ('09:00', '9:00 AM'),
++    ('10:00', '10:00 AM'),
++    ('11:00', '11:00 AM'),
++    ('12:00', '12:00 PM'),
++    ('13:00', '1:00 PM'),
++    ('14:00', '2:00 PM'),
++    ('15:00', '3:00 PM'),
++    ('16:00', '4:00 PM'),
++    ('17:00', '5:00 PM'),
++    ('18:00', '6:00 PM'),
++]
++
++
++class ExperienceBookingForm(forms.ModelForm):
++    time_slot = forms.ChoiceField(
++        choices=TIME_SLOT_CHOICES,
++        required=True,
++        widget=forms.Select(attrs={'class': 'form-input'})
++    )
++
++    event_service_date = forms.DateField(
++        required=True,
++        widget=forms.DateInput(attrs={
++            'type': 'date',
++            'class': 'form-input'
++        })
++    )
++
++    class Meta:
++        model = ExperienceBooking
++        fields = [
++            'event_service_name',
++            'event_service_date',
++            'time_slot',
++            'first_name',
++            'last_name',
++            'customer_email',
++            'customer_phone',
++            'special_requests',
++            'agreement_accepted',
++        ]
++        widgets = {
++            'event_service_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Event/Service Name'}),
++            'first_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'First Name'}),
++            'last_name': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Last Name'}),
++            'customer_email': forms.EmailInput(attrs={'class': 'form-input', 'placeholder': 'Email'}),
++            'customer_phone': forms.TextInput(attrs={'class': 'form-input', 'placeholder': 'Phone'}),
++            'special_requests': forms.Textarea(attrs={'class': 'form-textarea', 'placeholder': 'Special Requests', 'rows': 4}),
++            'agreement_accepted': forms.CheckboxInput(attrs={'class': 'form-checkbox'}),
++        }
++        labels = {
++            'event_service_name': 'Event/Service Name',
++            'event_service_date': 'Date',
++            'time_slot': 'Time Slot',
++            'first_name': 'First Name',
++            'last_name': 'Last Name',
++            'customer_email': 'Email',
++            'customer_phone': 'Phone',
++            'special_requests': 'Special Requests',
++            'agreement_accepted': 'I agree to the terms and conditions',
++        }
++
++    def clean_agreement_accepted(self):
++        agreement = self.cleaned_data.get('agreement_accepted')
++        if not agreement:
++            raise forms.ValidationError('You must agree to the terms and conditions.')
++        return agreement
+diff --git a/shop/migrations/0003_experiencebooking_agreement_accepted_and_more.py b/shop/migrations/0003_experiencebooking_agreement_accepted_and_more.py
+new file mode 100644
+index 0000000..9c5cdae
+--- /dev/null
++++ b/shop/migrations/0003_experiencebooking_agreement_accepted_and_more.py
+@@ -0,0 +1,53 @@
++# Generated by Django 4.2.11 on 2026-01-13 15:37
++
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ("shop", "0002_shopitem_is_featured"),
++    ]
++
++    operations = [
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="agreement_accepted",
++            field=models.BooleanField(default=False),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="date_signed",
++            field=models.DateTimeField(blank=True, null=True),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="event_service_date",
++            field=models.DateField(blank=True, null=True),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="event_service_name",
++            field=models.CharField(blank=True, max_length=255),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="first_name",
++            field=models.CharField(blank=True, max_length=100),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="last_name",
++            field=models.CharField(blank=True, max_length=100),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="special_requests",
++            field=models.TextField(blank=True),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="time_slot",
++            field=models.CharField(blank=True, max_length=10),
++        ),
++    ]
+diff --git a/shop/models.py b/shop/models.py
+index 54cc6dc..cbda6ab 100644
+--- a/shop/models.py
++++ b/shop/models.py
+@@ -229,6 +229,17 @@ class ExperienceBooking(models.Model):
+         limit_choices_to={"is_experience": True},
+     )
+ 
++    # New L1 fields
++    event_service_name = models.CharField(max_length=255, blank=True)
++    event_service_date = models.DateField(blank=True, null=True)
++    time_slot = models.CharField(max_length=10, blank=True)
++    first_name = models.CharField(max_length=100, blank=True)
++    last_name = models.CharField(max_length=100, blank=True)
++    special_requests = models.TextField(blank=True)
++    agreement_accepted = models.BooleanField(default=False)
++    date_signed = models.DateTimeField(blank=True, null=True)
++
++    # Legacy fields (keep for backwards compatibility)
+     customer_name = models.CharField(max_length=255)
+     customer_email = models.EmailField()
+     customer_phone = models.CharField(max_length=30, blank=True)
+diff --git a/shop/views.py b/shop/views.py
+index d1261c6..0ac0e9f 100644
+--- a/shop/views.py
++++ b/shop/views.py
+@@ -1,4 +1,5 @@
+ from decimal import Decimal
++from django.utils import timezone
+ 
+ from django.shortcuts import render, redirect, get_object_or_404
+ from django.http import JsonResponse, HttpResponseBadRequest
+@@ -6,6 +7,8 @@ from django.views.decorators.http import require_POST
+ from django.contrib.auth.decorators import login_required
+ from django.contrib import messages
+ from django.urls import reverse
++from django.core.mail import send_mail
++from django.conf import settings
+ 
+ from .models import (
+     ShopItem,
+@@ -21,6 +24,7 @@ from .cart_utils import (
+     session_cart_to_items,
+     get_session_cart,
+ )
++from .forms import ExperienceBookingForm
+ 
+ 
+ def _is_ajax_request(request):
+@@ -250,31 +254,105 @@ def checkout_view(request):
+ @require_POST
+ def experience_booking_create(request):
+     experience_id = request.POST.get("experience_id")
+-    customer_name = request.POST.get("customer_name")
+-    customer_email = request.POST.get("customer_email")
+ 
+-    if not experience_id or not customer_name or not customer_email:
+-        return HttpResponseBadRequest("Missing required fields")
++    if not experience_id:
++        return HttpResponseBadRequest("Missing experience ID")
+ 
+     experience = get_object_or_404(
+         ShopItem, id=experience_id, is_experience=True
+     )
+ 
+-    ExperienceBooking.objects.create(
+-        experience=experience,
+-        user=request.user if request.user.is_authenticated else None,
+-        customer_name=customer_name,
+-        customer_email=customer_email,
+-        customer_phone=request.POST.get("customer_phone", ""),
+-        notes=request.POST.get("notes", ""),
+-        status=ExperienceBooking.STATUS_PENDING,
+-        payment_required=False,
+-    )
++    form = ExperienceBookingForm(request.POST)
+ 
+-    messages.success(
+-        request,
+-        "Your booking request has been received. We will contact you shortly.",
+-    )
+-    return redirect(
+-        f"{reverse('shop:product_detail', args=[experience.slug])}?booked=1"
+-    )
++    if form.is_valid():
++        booking = form.save(commit=False)
++        booking.experience = experience
++        booking.user = request.user if request.user.is_authenticated else None
++
++        # Set customer_name from first_name + last_name for backwards compatibility
++        booking.customer_name = f"{booking.first_name} {booking.last_name}".strip()
++
++        # Set date_signed if agreement accepted
++        if booking.agreement_accepted:
++            booking.date_signed = timezone.now()
++
++        booking.status = ExperienceBooking.STATUS_PENDING
++        booking.payment_required = False
++        booking.save()
++
++        # Send email notification to admin
++        try:
++            admin_email = getattr(settings, 'CONTACT_EMAIL', settings.DEFAULT_FROM_EMAIL)
++            email_subject = f'New Experience Booking: {experience.title}'
++            email_body = f"""
++New experience booking received:
++
++Experience: {experience.title}
++Event/Service: {booking.event_service_name}
++Date: {booking.event_service_date}
++Time: {booking.time_slot}
++
++Customer Details:
++Name: {booking.first_name} {booking.last_name}
++Email: {booking.customer_email}
++Phone: {booking.customer_phone}
++
++Special Requests:
++{booking.special_requests or "None"}
++
++Agreement Accepted: {'Yes' if booking.agreement_accepted else 'No'}
++Date Signed: {booking.date_signed.strftime('%Y-%m-%d %H:%M:%S') if booking.date_signed else 'N/A'}
++
++---
++Booking ID: {booking.id}
++Created at: {booking.created_at.strftime('%Y-%m-%d %H:%M:%S')}
++"""
++            send_mail(
++                subject=email_subject,
++                message=email_body,
++                from_email=settings.DEFAULT_FROM_EMAIL,
++                recipient_list=[admin_email],
++                fail_silently=True,
++            )
++
++            # Send confirmation email to customer
++            customer_email_subject = f'Booking Confirmation: {experience.title}'
++            customer_email_body = f"""
++Dear {booking.first_name},
++
++Thank you for booking with Ochre Spirits!
++
++Booking Details:
++Experience: {experience.title}
++Event/Service: {booking.event_service_name}
++Date: {booking.event_service_date}
++Time: {booking.time_slot}
++
++We will contact you shortly to confirm your booking.
++
++Best regards,
++Ochre Spirits Team
++"""
++            send_mail(
++                subject=customer_email_subject,
++                message=customer_email_body,
++                from_email=settings.DEFAULT_FROM_EMAIL,
++                recipient_list=[booking.customer_email],
++                fail_silently=True,
++            )
++        except Exception as e:
++            print(f"Email sending failed: {e}")
++
++        messages.success(
++            request,
++            "Your booking request has been received. We will contact you shortly.",
++        )
++        return redirect(
++            f"{reverse('shop:product_detail', args=[experience.slug])}?booked=1"
++        )
++    else:
++        # Form has validation errors
++        for field, errors in form.errors.items():
++            for error in errors:
++                messages.error(request, f"{field}: {error}")
++        return redirect(reverse('shop:product_detail', args=[experience.slug]))
+diff --git a/templates/story/story_page.html b/templates/story/story_page.html
+index 1208b1f..6b31a16 100644
+--- a/templates/story/story_page.html
++++ b/templates/story/story_page.html
+@@ -63,8 +63,7 @@
+         <div class="timeline-item">
+             <span class="timeline-dot red"></span>
+             <div class="timeline-content">
+-                <div class="timeline-year">2023</div>
+-                <h3>The Beginning</h3>
++                <h3>2023 — The Beginning</h3>
+                 <p>Ochre Spirits launches in Goa with our first collection.</p>
+             </div>
+         </div>
+@@ -72,17 +71,15 @@
+         <div class="timeline-item">
+             <span class="timeline-dot green"></span>
+             <div class="timeline-content">
+-                <div class="timeline-year">2024</div>
+-                <h3>Expansion</h3>
+-                <p>New flavors & India’s first brand tasting room.</p>
++                <h3>2024 — Expansion</h3>
++                <p>New flavors & India's first brand tasting room.</p>
+             </div>
+         </div>
+ 
+         <div class="timeline-item">
+             <span class="timeline-dot orange"></span>
+             <div class="timeline-content">
+-                <div class="timeline-year">2025</div>
+-                <h3>Innovation Continues</h3>
++                <h3>2025 — Innovation Continues</h3>
+                 <p>Launch of premium Saffron Vodka.</p>
+             </div>
+         </div>
+-- 
+2.43.0
+
+
+From f71af3367d8c3fef85092277f541f7a40151e3ab Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Jan 2026 18:35:58 +0000
+Subject: [PATCH 2/5] FIX Story page timeline - Use correct 3-column structure
+ (year|dot|content) with full text
+
+---
+ templates/story/story_page.html | 30 +++++++++++++++++-------------
+ 1 file changed, 17 insertions(+), 13 deletions(-)
+
+diff --git a/templates/story/story_page.html b/templates/story/story_page.html
+index 6b31a16..0a5c34f 100644
+--- a/templates/story/story_page.html
++++ b/templates/story/story_page.html
+@@ -28,7 +28,7 @@
+ 
+ </div>
+ 
+-    <section class="story-philosophy story-journey">
++    <section class="story-philosophy">
+         <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
+         <h2>Inclusivity Over Exclusivity</h2>
+ 
+@@ -36,19 +36,19 @@
+             <div class="philosophy-item">
+                 <div class="philosophy-number red">1</div>
+                 <h3>Accessible Excellence</h3>
+-                <p>We believe exceptional spirits should be enjoyed by everyone.</p>
++                <p>We believe exceptional spirits should be enjoyed by everyone, not reserved for the elite few. Quality without pretension is our promise.</p>
+             </div>
+ 
+             <div class="philosophy-item">
+                 <div class="philosophy-number green">2</div>
+                 <h3>Authentic Innovation</h3>
+-                <p>We honor tradition while embracing modern techniques.</p>
++                <p>We honor tradition while embracing modern techniques, creating spirits that respect the past while boldly defining the future.</p>
+             </div>
+ 
+             <div class="philosophy-item">
+                 <div class="philosophy-number orange">3</div>
+                 <h3>Community First</h3>
+-                <p>Our success is measured by the connections we forge.</p>
++                <p>Our success is measured by the connections we forge and the experiences we create together, not just the bottles we sell.</p>
+             </div>
+         </div>
+     </section>
+@@ -59,28 +59,32 @@
+ 
+ <div class="story-journey">
+     <h2>Our Journey</h2>
++
+     <div class="timeline">
+         <div class="timeline-item">
+-            <span class="timeline-dot red"></span>
++            <div class="timeline-year">2023</div>
++            <div class="timeline-dot red"></div>
+             <div class="timeline-content">
+-                <h3>2023 — The Beginning</h3>
+-                <p>Ochre Spirits launches in Goa with our first collection.</p>
++                <h3>The Beginning</h3>
++                <p>Ochre Spirits launches in Goa with our first collection of craft spirits, introducing Saffron Gin, Peach & Cherry Vodka, and our signature flavored rums.</p>
+             </div>
+         </div>
+ 
+         <div class="timeline-item">
+-            <span class="timeline-dot green"></span>
++            <div class="timeline-year">2024</div>
++            <div class="timeline-dot green"></div>
+             <div class="timeline-content">
+-                <h3>2024 — Expansion</h3>
+-                <p>New flavors & India's first brand tasting room.</p>
++                <h3>Expansion</h3>
++                <p>Introduction of new flavors including Rose & Raspberry Gin, Kiwi & Pear Gin, and fruit-forward vodkas. Opening of India's first-ever brand tasting room.</p>
+             </div>
+         </div>
+ 
+         <div class="timeline-item">
+-            <span class="timeline-dot orange"></span>
++            <div class="timeline-year">2025</div>
++            <div class="timeline-dot orange"></div>
+             <div class="timeline-content">
+-                <h3>2025 — Innovation Continues</h3>
+-                <p>Launch of premium Saffron Vodka.</p>
++                <h3>Innovation Continues</h3>
++                <p>Launch of premium Saffron Vodka and continued commitment to creating spirits that transcend boundaries and celebrate tradition with a modern twist.</p>
+             </div>
+         </div>
+     </div>
+-- 
+2.43.0
+
+
+From efc6e4f54d7b8b0c0688475a2e4931f6bca6ad88 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Jan 2026 18:39:53 +0000
+Subject: [PATCH 3/5] Convert Story page to match static design exactly
+
+---
+ templates/story/story_page.html | 80 +++++++++++++++------------------
+ 1 file changed, 37 insertions(+), 43 deletions(-)
+
+diff --git a/templates/story/story_page.html b/templates/story/story_page.html
+index 0a5c34f..a216583 100644
+--- a/templates/story/story_page.html
++++ b/templates/story/story_page.html
+@@ -3,59 +3,54 @@
+ 
+ {% block content %}
+ 
+-<div class="story-page">
+-
+-    <div class="story-header">
+-        <p class="story-year"><span class="dash">—</span>SINCE 2023<span class="dash">—</span></p>
+-        <h1>Our Story</h1>
+-        <p class="story-tagline">We're not riding the wave. We're the tide that moves it.</p>
+-    </div>
+-
+-    <div class="story-content">
+-        <div class="story-text">
+-            <h2>Crafting Excellence</h2>
+-            <p>From our humble beginnings to becoming a recognized name in craft spirits, our journey has been driven by passion and innovation. We believe in pushing boundaries while respecting the art of distillation.</p>
++<div class="main">
++    <div class="story-page">
++        <div class="story-header">
++            <p class="story-year"><span class="dash">—</span>SINCE 2023<span class="dash">—</span></p>
++            <h1>Our Story</h1>
++            <p class="story-tagline">We're not riding the wave. We're the tide that moves it.</p>
++        </div>
+ 
+-            <p>Every bottle tells a story of dedication, precision, and creativity. Our master distillers combine traditional techniques with modern innovation to create spirits that stand out in both flavor and character.</p>
++        <div class="story-content">
++            <div class="story-text">
++                <h2>Crafting Excellence</h2>
++                <p>From our humble beginnings to becoming a recognized name in craft spirits, our journey has been driven by passion and innovation. We believe in pushing boundaries while respecting the art of distillation.</p>
+ 
+-            <p>We source the finest ingredients and employ sustainable practices throughout our production process. Quality isn't just a goal—it's our foundation, our promise, and our legacy.</p>
+-        </div>
++                <p>Every bottle tells a story of dedication, precision, and creativity. Our master distillers combine traditional techniques with modern innovation to create spirits that stand out in both flavor and character.</p>
+ 
+-        <div class="story-image">
+-            <div class="image-placeholder"></div>
++                <p>We source the finest ingredients and employ sustainable practices throughout our production process. Quality isn't just a goal—it's our foundation, our promise, and our legacy.</p>
++            </div>
++            <div class="story-image">
++                <div class="image-placeholder"></div>
++            </div>
+         </div>
+     </div>
+-
+ </div>
+ 
+-    <section class="story-philosophy">
+-        <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
+-        <h2>Inclusivity Over Exclusivity</h2>
+-
+-        <div class="philosophy-grid">
+-            <div class="philosophy-item">
+-                <div class="philosophy-number red">1</div>
+-                <h3>Accessible Excellence</h3>
+-                <p>We believe exceptional spirits should be enjoyed by everyone, not reserved for the elite few. Quality without pretension is our promise.</p>
+-            </div>
++<div class="gradient-divider"></div>
+ 
+-            <div class="philosophy-item">
+-                <div class="philosophy-number green">2</div>
+-                <h3>Authentic Innovation</h3>
+-                <p>We honor tradition while embracing modern techniques, creating spirits that respect the past while boldly defining the future.</p>
+-            </div>
++<div class="story-philosophy">
++    <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
++    <h2>Inclusivity Over Exclusivity</h2>
+ 
+-            <div class="philosophy-item">
+-                <div class="philosophy-number orange">3</div>
+-                <h3>Community First</h3>
+-                <p>Our success is measured by the connections we forge and the experiences we create together, not just the bottles we sell.</p>
+-            </div>
++    <div class="philosophy-grid">
++        <div class="philosophy-item">
++            <div class="philosophy-number red">1</div>
++            <h3>Accessible Excellence</h3>
++            <p>We believe exceptional spirits should be enjoyed by everyone, not reserved for the elite few. Quality without pretension is our promise.</p>
++        </div>
++        <div class="philosophy-item">
++            <div class="philosophy-number green">2</div>
++            <h3>Authentic Innovation</h3>
++            <p>We honor tradition while embracing modern techniques, creating spirits that respect the past while boldly defining the future.</p>
++        </div>
++        <div class="philosophy-item">
++            <div class="philosophy-number orange">3</div>
++            <h3>Community First</h3>
++            <p>Our success is measured by the connections we forge and the experiences we create together, not just the bottles we sell.</p>
+         </div>
+-    </section>
+-
+     </div>
+-
+-<div class="gradient-divider"></div>
++</div>
+ 
+ <div class="story-journey">
+     <h2>Our Journey</h2>
+@@ -93,7 +88,6 @@
+ <div class="story-experience">
+     <h2>Experience Our Story</h2>
+     <p>Visit our tasting room in Goa to immerse yourself in the world of Ochre Spirits</p>
+-
+     <div class="experience-buttons">
+         <button class="cn visit-btn"><a href="#">VISIT US</a></button>
+         <button class="cn explore-btn"><a href="{% url 'collections_app:collections_index' %}">EXPLORE COLLECTIONS</a></button>
+-- 
+2.43.0
+
+
+From 3a114face018e2a1c79b7421a66c02f8440c8ce7 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Jan 2026 18:51:21 +0000
+Subject: [PATCH 4/5] FIX Story page - Wrap sections in story-page div for
+ correct CSS application
+
+---
+ templates/story/story_page.html | 132 ++++++++++++++++----------------
+ 1 file changed, 67 insertions(+), 65 deletions(-)
+
+diff --git a/templates/story/story_page.html b/templates/story/story_page.html
+index a216583..e7994ab 100644
+--- a/templates/story/story_page.html
++++ b/templates/story/story_page.html
+@@ -3,94 +3,96 @@
+ 
+ {% block content %}
+ 
+-<div class="main">
+-    <div class="story-page">
+-        <div class="story-header">
+-            <p class="story-year"><span class="dash">—</span>SINCE 2023<span class="dash">—</span></p>
+-            <h1>Our Story</h1>
+-            <p class="story-tagline">We're not riding the wave. We're the tide that moves it.</p>
+-        </div>
++<div class="story-page">
++    <div class="story-header">
++        <p class="story-year"><span class="dash">—</span>SINCE 2023<span class="dash">—</span></p>
++        <h1>Our Story</h1>
++        <p class="story-tagline">We're not riding the wave. We're the tide that moves it.</p>
++    </div>
+ 
+-        <div class="story-content">
+-            <div class="story-text">
+-                <h2>Crafting Excellence</h2>
+-                <p>From our humble beginnings to becoming a recognized name in craft spirits, our journey has been driven by passion and innovation. We believe in pushing boundaries while respecting the art of distillation.</p>
++    <div class="story-content">
++        <div class="story-text">
++            <h2>Crafting Excellence</h2>
++            <p>From our humble beginnings to becoming a recognized name in craft spirits, our journey has been driven by passion and innovation. We believe in pushing boundaries while respecting the art of distillation.</p>
+ 
+-                <p>Every bottle tells a story of dedication, precision, and creativity. Our master distillers combine traditional techniques with modern innovation to create spirits that stand out in both flavor and character.</p>
++            <p>Every bottle tells a story of dedication, precision, and creativity. Our master distillers combine traditional techniques with modern innovation to create spirits that stand out in both flavor and character.</p>
+ 
+-                <p>We source the finest ingredients and employ sustainable practices throughout our production process. Quality isn't just a goal—it's our foundation, our promise, and our legacy.</p>
+-            </div>
+-            <div class="story-image">
+-                <div class="image-placeholder"></div>
+-            </div>
++            <p>We source the finest ingredients and employ sustainable practices throughout our production process. Quality isn't just a goal—it's our foundation, our promise, and our legacy.</p>
++        </div>
++        <div class="story-image">
++            <div class="image-placeholder"></div>
+         </div>
+     </div>
+ </div>
+ 
+ <div class="gradient-divider"></div>
+ 
+-<div class="story-philosophy">
+-    <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
+-    <h2>Inclusivity Over Exclusivity</h2>
++<div class="story-page">
++    <div class="story-philosophy">
++        <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
++        <h2>Inclusivity Over Exclusivity</h2>
+ 
+-    <div class="philosophy-grid">
+-        <div class="philosophy-item">
+-            <div class="philosophy-number red">1</div>
+-            <h3>Accessible Excellence</h3>
+-            <p>We believe exceptional spirits should be enjoyed by everyone, not reserved for the elite few. Quality without pretension is our promise.</p>
+-        </div>
+-        <div class="philosophy-item">
+-            <div class="philosophy-number green">2</div>
+-            <h3>Authentic Innovation</h3>
+-            <p>We honor tradition while embracing modern techniques, creating spirits that respect the past while boldly defining the future.</p>
+-        </div>
+-        <div class="philosophy-item">
+-            <div class="philosophy-number orange">3</div>
+-            <h3>Community First</h3>
+-            <p>Our success is measured by the connections we forge and the experiences we create together, not just the bottles we sell.</p>
++        <div class="philosophy-grid">
++            <div class="philosophy-item">
++                <div class="philosophy-number red">1</div>
++                <h3>Accessible Excellence</h3>
++                <p>We believe exceptional spirits should be enjoyed by everyone, not reserved for the elite few. Quality without pretension is our promise.</p>
++            </div>
++            <div class="philosophy-item">
++                <div class="philosophy-number green">2</div>
++                <h3>Authentic Innovation</h3>
++                <p>We honor tradition while embracing modern techniques, creating spirits that respect the past while boldly defining the future.</p>
++            </div>
++            <div class="philosophy-item">
++                <div class="philosophy-number orange">3</div>
++                <h3>Community First</h3>
++                <p>Our success is measured by the connections we forge and the experiences we create together, not just the bottles we sell.</p>
++            </div>
+         </div>
+     </div>
+ </div>
+ 
+-<div class="story-journey">
+-    <h2>Our Journey</h2>
++<div class="story-page">
++    <div class="story-journey">
++        <h2>Our Journey</h2>
+ 
+-    <div class="timeline">
+-        <div class="timeline-item">
+-            <div class="timeline-year">2023</div>
+-            <div class="timeline-dot red"></div>
+-            <div class="timeline-content">
+-                <h3>The Beginning</h3>
+-                <p>Ochre Spirits launches in Goa with our first collection of craft spirits, introducing Saffron Gin, Peach & Cherry Vodka, and our signature flavored rums.</p>
++        <div class="timeline">
++            <div class="timeline-item">
++                <div class="timeline-year">2023</div>
++                <div class="timeline-dot red"></div>
++                <div class="timeline-content">
++                    <h3>The Beginning</h3>
++                    <p>Ochre Spirits launches in Goa with our first collection of craft spirits, introducing Saffron Gin, Peach & Cherry Vodka, and our signature flavored rums.</p>
++                </div>
+             </div>
+-        </div>
+ 
+-        <div class="timeline-item">
+-            <div class="timeline-year">2024</div>
+-            <div class="timeline-dot green"></div>
+-            <div class="timeline-content">
+-                <h3>Expansion</h3>
+-                <p>Introduction of new flavors including Rose & Raspberry Gin, Kiwi & Pear Gin, and fruit-forward vodkas. Opening of India's first-ever brand tasting room.</p>
++            <div class="timeline-item">
++                <div class="timeline-year">2024</div>
++                <div class="timeline-dot green"></div>
++                <div class="timeline-content">
++                    <h3>Expansion</h3>
++                    <p>Introduction of new flavors including Rose & Raspberry Gin, Kiwi & Pear Gin, and fruit-forward vodkas. Opening of India's first-ever brand tasting room.</p>
++                </div>
+             </div>
+-        </div>
+ 
+-        <div class="timeline-item">
+-            <div class="timeline-year">2025</div>
+-            <div class="timeline-dot orange"></div>
+-            <div class="timeline-content">
+-                <h3>Innovation Continues</h3>
+-                <p>Launch of premium Saffron Vodka and continued commitment to creating spirits that transcend boundaries and celebrate tradition with a modern twist.</p>
++            <div class="timeline-item">
++                <div class="timeline-year">2025</div>
++                <div class="timeline-dot orange"></div>
++                <div class="timeline-content">
++                    <h3>Innovation Continues</h3>
++                    <p>Launch of premium Saffron Vodka and continued commitment to creating spirits that transcend boundaries and celebrate tradition with a modern twist.</p>
++                </div>
+             </div>
+         </div>
+     </div>
+-</div>
+ 
+-<div class="story-experience">
+-    <h2>Experience Our Story</h2>
+-    <p>Visit our tasting room in Goa to immerse yourself in the world of Ochre Spirits</p>
+-    <div class="experience-buttons">
+-        <button class="cn visit-btn"><a href="#">VISIT US</a></button>
+-        <button class="cn explore-btn"><a href="{% url 'collections_app:collections_index' %}">EXPLORE COLLECTIONS</a></button>
++    <div class="story-experience">
++        <h2>Experience Our Story</h2>
++        <p>Visit our tasting room in Goa to immerse yourself in the world of Ochre Spirits</p>
++        <div class="experience-buttons">
++            <button class="cn visit-btn"><a href="#">VISIT US</a></button>
++            <button class="cn explore-btn"><a href="{% url 'collections_app:collections_index' %}">EXPLORE COLLECTIONS</a></button>
++        </div>
+     </div>
+ </div>
+ 
+-- 
+2.43.0
+
+
+From 8f0b6eb2c2323f1dbf5d38c99c5dfcbdfea8c776 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 13 Jan 2026 18:54:32 +0000
+Subject: [PATCH 5/5] Add philosophy number color classes (red, green, orange)
+
+---
+ static/style.css | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/static/style.css b/static/style.css
+index fad6d9b..a0ece2e 100644
+--- a/static/style.css
++++ b/static/style.css
+@@ -3747,6 +3747,11 @@ footer,
+ .story-page .timeline-dot.orange { background: #f28c28; }
+ .story-page .timeline-content { text-align: left; }
+ 
++/* Philosophy number colors */
++.story-page .philosophy-number.red { background: var(--accent-red); }
++.story-page .philosophy-number.green { background: #2bbecf; }
++.story-page .philosophy-number.orange { background: #f28c28; }
++
+ /* === STORY PAGE: PHILOSOPHY — CENTERED (SAFE OVERRIDE) === */
+ .story-page .story-philosophy {
+   max-width: 1100px;
+-- 
+2.43.0
+
