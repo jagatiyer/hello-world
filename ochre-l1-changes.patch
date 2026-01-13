@@ -1,0 +1,989 @@
+diff --git a/contact/forms.py b/contact/forms.py
+index fd1646a..7e67135 100644
+--- a/contact/forms.py
++++ b/contact/forms.py
+@@ -1,9 +1,9 @@
+ from django import forms
+-from .models import ContactMessage
++from .models import ContactSubmission
+ 
+ class ContactForm(forms.ModelForm):
+     class Meta:
+-        model = ContactMessage
++        model = ContactSubmission
+         fields = ["name", "email", "phone", "subject", "message"]
+ 
+         widgets = {
+diff --git a/contact/views.py b/contact/views.py
+index c96a9c0..586231f 100644
+--- a/contact/views.py
++++ b/contact/views.py
+@@ -1,5 +1,7 @@
+ from django.shortcuts import render, redirect
+ from django.contrib import messages
++from django.core.mail import send_mail
++from django.conf import settings
+ from .models import ContactSubmission
+ 
+ 
+@@ -12,7 +14,7 @@ def contact_page(request):
+         message = request.POST.get("message", "").strip()
+ 
+         # Save to DB
+-        ContactSubmission.objects.create(
++        submission = ContactSubmission.objects.create(
+             name=name,
+             email=email,
+             phone=phone,
+@@ -20,6 +22,36 @@ def contact_page(request):
+             message=message,
+         )
+ 
++        # Send email notification to admin
++        try:
++            admin_email = getattr(settings, 'CONTACT_EMAIL', settings.DEFAULT_FROM_EMAIL)
++            email_subject = f'New Contact Form Submission: {subject or "No Subject"}'
++            email_body = f"""
++New contact form submission received:
++
++Name: {name}
++Email: {email}
++Phone: {phone}
++Subject: {subject}
++
++Message:
++{message}
++
++---
++Submission ID: {submission.id}
++Submitted at: {submission.created_at.strftime('%Y-%m-%d %H:%M:%S')}
++"""
++            send_mail(
++                subject=email_subject,
++                message=email_body,
++                from_email=settings.DEFAULT_FROM_EMAIL,
++                recipient_list=[admin_email],
++                fail_silently=True,
++            )
++        except Exception as e:
++            # Log error but don't fail the submission
++            print(f"Email sending failed: {e}")
++
+         # Success toast
+         messages.success(request, "Message Sent Successfully!")
+ 
+diff --git a/ochre/settings.py b/ochre/settings.py
+index bdd474f..a62ec81 100644
+--- a/ochre/settings.py
++++ b/ochre/settings.py
+@@ -227,6 +227,27 @@ LOGIN_REDIRECT_URL = "/"
+ LOGOUT_REDIRECT_URL = "/"
+ 
+ 
++# ============================================================
++# EMAIL CONFIGURATION
++# ============================================================
++
++# Development: Print emails to console
++# Production: Configure SMTP settings
++EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
++
++# Email settings (update for production)
++DEFAULT_FROM_EMAIL = "noreply@ochrespirits.com"
++CONTACT_EMAIL = "hello@ochrespirits.com"  # Admin email for bookings
++
++# For production, use:
++# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
++# EMAIL_HOST = "smtp.gmail.com"  # or your SMTP server
++# EMAIL_PORT = 587
++# EMAIL_USE_TLS = True
++# EMAIL_HOST_USER = "your-email@gmail.com"
++# EMAIL_HOST_PASSWORD = "your-app-password"
++
++
+ # ============================================================
+ # DEFAULTS
+ # ============================================================
+diff --git a/shop/admin.py b/shop/admin.py
+index fa1a3a3..a907969 100644
+--- a/shop/admin.py
++++ b/shop/admin.py
+@@ -72,15 +72,37 @@ class ShopItemAdmin(admin.ModelAdmin):
+ @admin.register(ExperienceBooking)
+ class ExperienceBookingAdmin(admin.ModelAdmin):
+     list_display = (
++        "id",
+         "experience",
++        "event_service_name",
+         "customer_name",
+         "customer_email",
++        "event_service_date",
++        "time_slot",
+         "status",
+         "created_at",
+     )
+-    list_filter = ("status",)
+-    search_fields = ("customer_name", "customer_email")
+-    readonly_fields = ("created_at", "updated_at")
++    list_filter = ("status", "event_service_date")
++    search_fields = ("customer_name", "customer_email", "first_name", "last_name", "event_service_name")
++    readonly_fields = ("created_at", "updated_at", "date_signed", "customer_name")
++    fieldsets = (
++        ("Experience Details", {
++            "fields": ("experience", "event_service_name", "event_service_date", "time_slot")
++        }),
++        ("Customer Information", {
++            "fields": ("first_name", "last_name", "customer_email", "customer_phone", "customer_name")
++        }),
++        ("Additional Details", {
++            "fields": ("special_requests", "agreement_accepted", "date_signed")
++        }),
++        ("Booking Status", {
++            "fields": ("user", "status", "payment_required", "payment_ref")
++        }),
++        ("Legacy/Metadata", {
++            "fields": ("notes", "metadata", "created_at", "updated_at"),
++            "classes": ("collapse",)
++        }),
++    )
+ 
+ 
+ @admin.register(ProductType)
+diff --git a/shop/forms.py b/shop/forms.py
+new file mode 100644
+index 0000000..9a82ee4
+--- /dev/null
++++ b/shop/forms.py
+@@ -0,0 +1,106 @@
++from django import forms
++from .models import ExperienceBooking
++
++# Static time slot options
++TIME_SLOT_CHOICES = [
++    ('', 'Select a time slot'),
++    ('09:00', '9:00 AM'),
++    ('10:00', '10:00 AM'),
++    ('11:00', '11:00 AM'),
++    ('12:00', '12:00 PM'),
++    ('13:00', '1:00 PM'),
++    ('14:00', '2:00 PM'),
++    ('15:00', '3:00 PM'),
++    ('16:00', '4:00 PM'),
++    ('17:00', '5:00 PM'),
++    ('18:00', '6:00 PM'),
++]
++
++
++class ExperienceBookingForm(forms.ModelForm):
++    """
++    Form for booking experiences.
++    Email + Database submission.
++    """
++
++    time_slot = forms.ChoiceField(
++        choices=TIME_SLOT_CHOICES,
++        required=True,
++        widget=forms.Select(attrs={'class': 'form-input'})
++    )
++
++    class Meta:
++        model = ExperienceBooking
++        fields = [
++            'event_service_name',
++            'event_service_date',
++            'time_slot',
++            'first_name',
++            'last_name',
++            'customer_email',
++            'customer_phone',
++            'special_requests',
++            'agreement_accepted',
++        ]
++        widgets = {
++            'event_service_name': forms.TextInput(attrs={
++                'class': 'form-input',
++                'placeholder': 'Enter event or service name',
++            }),
++            'event_service_date': forms.DateInput(attrs={
++                'class': 'form-input',
++                'type': 'date',
++            }),
++            'first_name': forms.TextInput(attrs={
++                'class': 'form-input',
++                'placeholder': 'First Name',
++            }),
++            'last_name': forms.TextInput(attrs={
++                'class': 'form-input',
++                'placeholder': 'Last Name',
++            }),
++            'customer_email': forms.EmailInput(attrs={
++                'class': 'form-input',
++                'placeholder': 'example@example.com',
++            }),
++            'customer_phone': forms.TextInput(attrs={
++                'class': 'form-input',
++                'placeholder': '(###) ###-####',
++            }),
++            'special_requests': forms.Textarea(attrs={
++                'class': 'form-input',
++                'placeholder': 'Any special requests or comments',
++                'rows': 4,
++            }),
++            'agreement_accepted': forms.CheckboxInput(attrs={
++                'class': 'form-checkbox',
++            }),
++        }
++        labels = {
++            'event_service_name': 'Event/Service Name',
++            'event_service_date': 'Event/Service Date',
++            'time_slot': 'Select Time Slot',
++            'first_name': 'First Name',
++            'last_name': 'Last Name',
++            'customer_email': 'Email',
++            'customer_phone': 'Phone Number',
++            'special_requests': 'Special Requests or Comments',
++            'agreement_accepted': 'I agree to the arrival and rescheduling policy',
++        }
++
++    def clean_agreement_accepted(self):
++        """Ensure agreement is checked"""
++        agreement = self.cleaned_data.get('agreement_accepted')
++        if not agreement:
++            raise forms.ValidationError('You must agree to the terms and conditions.')
++        return agreement
++
++    def clean_customer_phone(self):
++        """Basic phone validation"""
++        phone = self.cleaned_data.get('customer_phone')
++        if phone:
++            # Remove common separators
++            phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
++            if not phone.isdigit() or len(phone) < 10:
++                raise forms.ValidationError('Please enter a valid phone number.')
++        return phone
+diff --git a/shop/migrations/0002_experiencebooking_agreement_accepted_and_more.py b/shop/migrations/0002_experiencebooking_agreement_accepted_and_more.py
+new file mode 100644
+index 0000000..56013b8
+--- /dev/null
++++ b/shop/migrations/0002_experiencebooking_agreement_accepted_and_more.py
+@@ -0,0 +1,63 @@
++# Generated by Django 4.2.11 on 2026-01-13 02:22
++
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ("shop", "0001_initial"),
++    ]
++
++    operations = [
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="agreement_accepted",
++            field=models.BooleanField(default=False),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="date_signed",
++            field=models.DateField(auto_now_add=True, null=True),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="event_service_date",
++            field=models.DateField(blank=True, null=True),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="event_service_name",
++            field=models.CharField(blank=True, max_length=255),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="first_name",
++            field=models.CharField(blank=True, max_length=100),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="last_name",
++            field=models.CharField(blank=True, max_length=100),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="special_requests",
++            field=models.TextField(blank=True),
++        ),
++        migrations.AddField(
++            model_name="experiencebooking",
++            name="time_slot",
++            field=models.CharField(blank=True, max_length=10),
++        ),
++        migrations.AlterField(
++            model_name="experiencebooking",
++            name="customer_email",
++            field=models.EmailField(blank=True, max_length=254),
++        ),
++        migrations.AlterField(
++            model_name="experiencebooking",
++            name="customer_name",
++            field=models.CharField(blank=True, max_length=255),
++        ),
++    ]
+diff --git a/shop/models.py b/shop/models.py
+index e8d647c..30301b4 100644
+--- a/shop/models.py
++++ b/shop/models.py
+@@ -225,10 +225,26 @@ class ExperienceBooking(models.Model):
+         limit_choices_to={"is_experience": True},
+     )
+ 
+-    customer_name = models.CharField(max_length=255)
+-    customer_email = models.EmailField()
++    # Event details
++    event_service_name = models.CharField(max_length=255, blank=True)
++    event_service_date = models.DateField(null=True, blank=True)
++    time_slot = models.CharField(max_length=10, blank=True)  # Stores "09:00", "14:00", etc.
++
++    # Customer info
++    first_name = models.CharField(max_length=100, blank=True)
++    last_name = models.CharField(max_length=100, blank=True)
++    customer_email = models.EmailField(blank=True)
+     customer_phone = models.CharField(max_length=30, blank=True)
+ 
++    # Additional details
++    special_requests = models.TextField(blank=True)
++
++    # Agreement
++    agreement_accepted = models.BooleanField(default=False)
++    date_signed = models.DateField(auto_now_add=True, null=True, blank=True)
++
++    # Legacy fields (kept for backwards compatibility)
++    customer_name = models.CharField(max_length=255, blank=True)
+     notes = models.TextField(blank=True)
+     metadata = models.JSONField(blank=True, null=True)
+ 
+@@ -247,8 +263,14 @@ class ExperienceBooking(models.Model):
+     class Meta:
+         ordering = ("-created_at",)
+ 
++    def save(self, *args, **kwargs):
++        # Auto-populate customer_name from first_name and last_name
++        if self.first_name and self.last_name:
++            self.customer_name = f"{self.first_name} {self.last_name}"
++        super().save(*args, **kwargs)
++
+     def __str__(self):
+-        return f"Booking #{self.pk}"
++        return f"Booking #{self.pk} - {self.event_service_name}"
+ 
+ 
+ # ---------------------------
+diff --git a/shop/views.py b/shop/views.py
+index d1261c6..beb3958 100644
+--- a/shop/views.py
++++ b/shop/views.py
+@@ -6,6 +6,9 @@ from django.views.decorators.http import require_POST
+ from django.contrib.auth.decorators import login_required
+ from django.contrib import messages
+ from django.urls import reverse
++from django.core.mail import send_mail
++from django.conf import settings
++from django.template.loader import render_to_string
+ 
+ from .models import (
+     ShopItem,
+@@ -15,6 +18,7 @@ from .models import (
+     ExperienceBooking,
+     ProductUnit,
+ )
++from .forms import ExperienceBookingForm
+ from .cart_utils import (
+     add_to_session_cart,
+     remove_from_session_cart,
+@@ -62,7 +66,16 @@ def shop_index(request):
+ 
+ def product_detail(request, slug):
+     item = get_object_or_404(ShopItem, slug=slug, published=True)
+-    return render(request, "shop/product_detail.html", {"item": item})
++
++    # If this is an experience, provide the booking form
++    booking_form = None
++    if item.is_experience:
++        booking_form = ExperienceBookingForm()
++
++    return render(request, "shop/product_detail.html", {
++        "item": item,
++        "booking_form": booking_form,
++    })
+ 
+ 
+ # ============================================================
+@@ -250,31 +263,77 @@ def checkout_view(request):
+ @require_POST
+ def experience_booking_create(request):
+     experience_id = request.POST.get("experience_id")
+-    customer_name = request.POST.get("customer_name")
+-    customer_email = request.POST.get("customer_email")
+ 
+-    if not experience_id or not customer_name or not customer_email:
+-        return HttpResponseBadRequest("Missing required fields")
++    if not experience_id:
++        return HttpResponseBadRequest("Missing experience_id")
+ 
+     experience = get_object_or_404(
+         ShopItem, id=experience_id, is_experience=True
+     )
+ 
+-    ExperienceBooking.objects.create(
+-        experience=experience,
+-        user=request.user if request.user.is_authenticated else None,
+-        customer_name=customer_name,
+-        customer_email=customer_email,
+-        customer_phone=request.POST.get("customer_phone", ""),
+-        notes=request.POST.get("notes", ""),
+-        status=ExperienceBooking.STATUS_PENDING,
+-        payment_required=False,
+-    )
++    form = ExperienceBookingForm(request.POST)
+ 
+-    messages.success(
+-        request,
+-        "Your booking request has been received. We will contact you shortly.",
+-    )
+-    return redirect(
+-        f"{reverse('shop:product_detail', args=[experience.slug])}?booked=1"
+-    )
++    if form.is_valid():
++        # Save to database
++        booking = form.save(commit=False)
++        booking.experience = experience
++        booking.user = request.user if request.user.is_authenticated else None
++        booking.status = ExperienceBooking.STATUS_PENDING
++        booking.save()
++
++        # Send email to admin
++        try:
++            admin_email = getattr(settings, 'CONTACT_EMAIL', settings.DEFAULT_FROM_EMAIL)
++            subject = f'New Experience Booking: {booking.event_service_name}'
++
++            # Format time slot for display
++            time_display = dict(form.fields['time_slot'].choices).get(
++                booking.time_slot, booking.time_slot
++            )
++
++            message = f"""
++New Experience Booking Received
++
++Experience: {experience.title}
++Event/Service: {booking.event_service_name}
++Date: {booking.event_service_date.strftime('%B %d, %Y')}
++Time Slot: {time_display}
++
++Customer Information:
++Name: {booking.first_name} {booking.last_name}
++Email: {booking.customer_email}
++Phone: {booking.customer_phone}
++
++Special Requests:
++{booking.special_requests or 'None'}
++
++Agreement Accepted: Yes
++Booking ID: #{booking.id}
++            """.strip()
++
++            send_mail(
++                subject=subject,
++                message=message,
++                from_email=settings.DEFAULT_FROM_EMAIL,
++                recipient_list=[admin_email],
++                fail_silently=True,
++            )
++        except Exception as e:
++            # Log error but don't fail the booking
++            pass
++
++        messages.success(
++            request,
++            "Your booking request has been received. We will contact you shortly.",
++        )
++        return redirect(
++            f"{reverse('shop:product_detail', args=[experience.slug])}?booked=1"
++        )
++
++    else:
++        # Form has errors - re-render the product page with form errors
++        messages.error(request, "Please correct the errors in the booking form.")
++        return render(request, "shop/product_detail.html", {
++            "item": experience,
++            "booking_form": form,
++        })
+diff --git a/templates/shop/product_detail.html b/templates/shop/product_detail.html
+index daa082f..d151cd9 100644
+--- a/templates/shop/product_detail.html
++++ b/templates/shop/product_detail.html
+@@ -133,6 +133,76 @@
+                     Add to Cart
+                 </button>
+             </form>
++
++            {% else %}
++            <!-- BOOKING FORM -->
++            <div class="contact-form-section" style="margin-top:0;">
++                <h3>Book this <span class="highlight-cyan">Experience</span></h3>
++
++                <form class="contact-form" method="POST" action="{% url 'shop:experience_booking_create' %}">
++                    {% csrf_token %}
++                    <input type="hidden" name="experience_id" value="{{ item.id }}">
++
++                    {% if booking_form %}
++                        <div class="form-row">
++                            <input type="text" name="event_service_name" placeholder="Event/Service Name" required
++                                   value="{{ booking_form.event_service_name.value|default:'' }}">
++                            <input type="date" name="event_service_date" required
++                                   value="{{ booking_form.event_service_date.value|default:'' }}">
++                        </div>
++
++                        <div class="form-row">
++                            <input type="text" name="first_name" placeholder="First Name" required
++                                   value="{{ booking_form.first_name.value|default:'' }}">
++                            <input type="text" name="last_name" placeholder="Last Name" required
++                                   value="{{ booking_form.last_name.value|default:'' }}">
++                        </div>
++
++                        <div class="form-row">
++                            <input type="email" name="customer_email" placeholder="Email" required
++                                   value="{{ booking_form.customer_email.value|default:'' }}">
++                            <input type="tel" name="customer_phone" placeholder="Phone Number" required
++                                   value="{{ booking_form.customer_phone.value|default:'' }}">
++                        </div>
++
++                        <select name="time_slot" required style="width:100%;padding:12px;margin-bottom:15px;font-size:15px;border-radius:8px;border:1px solid #2a2a2a;background-color:#111;color:#fff;">
++                            <option value="">Select a time slot</option>
++                            <option value="09:00">9:00 AM</option>
++                            <option value="10:00">10:00 AM</option>
++                            <option value="11:00">11:00 AM</option>
++                            <option value="12:00">12:00 PM</option>
++                            <option value="13:00">1:00 PM</option>
++                            <option value="14:00">2:00 PM</option>
++                            <option value="15:00">3:00 PM</option>
++                            <option value="16:00">4:00 PM</option>
++                            <option value="17:00">5:00 PM</option>
++                            <option value="18:00">6:00 PM</option>
++                        </select>
++
++                        <textarea name="special_requests" placeholder="Special Requests or Comments (optional)" rows="4">{{ booking_form.special_requests.value|default:'' }}</textarea>
++
++                        <div style="margin:15px 0;display:flex;align-items:start;gap:10px;">
++                            <input type="checkbox" name="agreement_accepted" id="agreement_accepted" required
++                                   style="margin-top:4px;width:18px;height:18px;">
++                            <label for="agreement_accepted" style="font-size:14px;line-height:1.5;">
++                                I agree to the arrival and rescheduling policy
++                            </label>
++                        </div>
++
++                        {% if booking_form.errors %}
++                        <div style="color:#ff5b5f;margin-bottom:15px;font-size:14px;">
++                            {% for field, errors in booking_form.errors.items %}
++                                {% for error in errors %}
++                                    <p>{{ error }}</p>
++                                {% endfor %}
++                            {% endfor %}
++                        </div>
++                        {% endif %}
++                    {% endif %}
++
++                    <button type="submit" class="cn">BOOK NOW</button>
++                </form>
++            </div>
+             {% endif %}
+ 
+             {% if item.description %}
+diff --git a/templates/story/society.html b/templates/story/society.html
+index f39d4ae..7bb8ef4 100644
+--- a/templates/story/society.html
++++ b/templates/story/society.html
+@@ -1,162 +1,138 @@
+ {% extends "base.html" %}
+ {% load static %}
+ 
+-{% block extra_head %}
+-<style>
+-  /* Scoped society page adjustments */
+-  .story-header.society-hero { max-width: 900px; margin: 60px auto 10px; text-align: left; padding-top: 60px; }
+-  .story-header.society-hero h1 { font-size: 64px; margin-bottom: 12px; }
+-  .society-sub { color: var(--text-muted); font-size: 18px; margin-bottom: 18px; }
+-
+-  .society-content { max-width: 900px; margin: 60px auto 80px; text-align: left; padding: 0 20px; }
+-  .society-steps { display: flex; flex-direction: column; gap: 28px; margin-top: 18px; }
+-  .society-step h3 { font-size: 22px; margin: 0 0 8px; }
+-  .society-step p { margin: 0; color: var(--text-muted); line-height: 1.8; }
+-
+-  .society-benefits .benefit p { margin: 0 0 16px; color: var(--text-muted); line-height: 1.6; }
+-
+-  ul.society-list { margin: 18px 0 18px 20px; padding-left: 0; color: var(--text-muted); }
+-  ul.society-list li { margin-bottom: 10px; line-height: 1.6; }
+-
+-  .society-closer p { margin: 10px 0; color: var(--text-muted); line-height: 1.6; }
+-  .cn.join-btn { display: inline-block; padding: 10px 18px; text-decoration: none; }
+-
+-  @media (max-width: 720px) {
+-    .story-header.society-hero h1 { font-size: 40px; }
+-    .society-content { padding: 0 12px; }
+-  }
+-</style>
+-{% endblock %}
+-
+ {% block content %}
+ 
+ <div class="story-page">
++    <div class="story-header">
++        <h1>The Ochre Society</h1>
++        <p class="story-tagline">An invite-only dining membership with a waitlist.</p>
++    </div>
+ 
+-  <div class="story-header society-hero">
+-    <h1>The Ochre Society</h1>
++    <div class="story-content">
++        <div class="story-text">
++            <p>A private dining circle where you walk into the city's most exceptional restaurants…and Ochre pays for your meal.</p>
+ 
+-    <p class="society-sub">An invite-only dining membership with a waitlist.</p>
++            <p><strong>Yes, it's real.</strong><br>
++            <strong>Yes, it's audacious.</strong><br>
++            <strong>Yes, you'll want in.</strong></p>
+ 
+-    <p class="society-sub">A private dining circle where you walk into the city’s most exceptional restaurants…and Ochre pays for your meal.</p>
++            <p>The Ochre Society is an invitation-only dining membership that unlocks seamless access to the city's finest bars and restaurants. Every time you dine, your bill (up to your visit limit) is settled by Ochre discreetly, elegantly, and without a single step required from you.</p>
+ 
+-    <p class="society-sub">Yes, it’s real.</p>
+-    <p class="society-sub">Yes, it’s audacious.</p>
+-    <p class="society-sub">Yes, you’ll want in.</p>
++            <p><strong>No apps. No coupons. No presentations.</strong><br>
++            Only pure, beautifully engineered privilege.</p>
++        </div>
++        <div class="story-image">
++            <div class="image-placeholder"></div>
++        </div>
++    </div>
++</div>
+ 
+-    <p class="society-sub">The Ochre Society is an invitation-only dining membership that unlocks seamless access to the city’s finest bars and restaurants. Every time you dine, your bill (up to your visit limit) is settled by Ochre discreetly, elegantly, and without a single step required from you.</p>
++<div class="gradient-divider"></div>
+ 
+-    <p class="society-sub">No apps. No coupons.</p>
+-    <p class="society-sub">No presentations.</p>
+-    <p class="society-sub">Only pure, beautifully engineered privilege.</p>
+-  </div>
++<div class="story-philosophy">
++    <p class="philosophy-label"><span class="dash">—</span>HOW IT WORKS<span class="dash">—</span></p>
++    <h2>Luxury, distilled to simplicity</h2>
+ 
+-  <div class="society-content">
++    <div class="philosophy-grid">
++        <div class="philosophy-item">
++            <div class="philosophy-number red">1</div>
++            <h3>Enter a world of curated excellence</h3>
++            <p>Each partner venue is chosen for craft, cuisine, ambience, and soul. These are not "options." They are the city's most remarkable rooms opened exclusively to you.</p>
++        </div>
++        <div class="philosophy-item">
++            <div class="philosophy-number green">2</div>
++            <h3>Dine as you always do, only elevated</h3>
++            <p>No cards. No codes. No conversations. Sit down, order what you love, and enjoy the evening.</p>
++        </div>
++        <div class="philosophy-item">
++            <div class="philosophy-number orange">3</div>
++            <h3>Your Ochre benefit activates invisibly</h3>
++            <p>Behind the scenes, Ochre settles your bill. There is no process. No break in the moment. Just seamless privilege woven into your dining ritual.</p>
++        </div>
++    </div>
++</div>
+ 
+-    <section class="society-section">
+-      <h2>How The Ochre Society Works</h2>
+-      <p class="society-sub">Luxury, distilled to simplicity.</p>
++<div class="story-journey">
++    <h2>Why Members Choose The Ochre Society</h2>
+ 
+-      <div class="society-steps">
+-        <div class="society-step">
+-          <h3>1. Enter a world of curated excellence</h3>
+-          <p>Each partner venue is chosen for craft, cuisine, ambience, and soul.
+-These are not “options.”
+-They are the city’s most remarkable rooms opened exclusively to you.</p>
++    <div class="timeline">
++        <div class="timeline-item">
++            <div class="timeline-dot red"></div>
++            <div class="timeline-content">
++                <h3>Significant, predictable monthly savings</h3>
++                <p>A fixed benefit is applied to every visit. If you dine out even 2–4 times a month, your membership pays for itself — often many times over.</p>
++            </div>
+         </div>
+ 
+-        <div class="society-step">
+-          <h3>2. Dine as you always do, only elevated</h3>
+-          <p>No cards. No codes. No conversations.
+-Sit down, order what you love, and enjoy the evening.</p>
++        <div class="timeline-item">
++            <div class="timeline-dot green"></div>
++            <div class="timeline-content">
++                <h3>The city's finest bars and restaurants</h3>
++                <p>No noise. No guesswork. Just the top 100 venues selected for food, ambience, service, and consistency.</p>
++            </div>
+         </div>
+ 
+-        <div class="society-step">
+-          <h3>3. Your Ochre benefit activates invisibly</h3>
+-          <p>Behind the scenes, Ochre settles your bill.
+-There is no process. No break in the moment.
+-Just seamless privilege woven into your dining ritual.</p>
++        <div class="timeline-item">
++            <div class="timeline-dot orange"></div>
++            <div class="timeline-content">
++                <h3>A billing experience that simply disappears</h3>
++                <p>No scanning. No redeeming. Your benefit applies silently in the background.</p>
++            </div>
+         </div>
+ 
+-        <div class="society-step">
+-          <h3>4. You pay only if you wish to go beyond</h3>
+-          <p>Stay within your limit → you spend nothing.
+-Choose to indulge further → you cover only the difference.
+-Ochre handles the rest.</p>
++        <div class="timeline-item">
++            <div class="timeline-dot red"></div>
++            <div class="timeline-content">
++                <h3>You are recognised as a high-trust diner</h3>
++                <p>Partner venues extend smoother hosting and exceptional service to Ochre Society members.</p>
++            </div>
+         </div>
+ 
+-        <div class="society-step">
+-          <p>It’s the closest thing to having a private citywide dining tab — a privilege that travels with you, without ever being spoken aloud.</p>
++        <div class="timeline-item">
++            <div class="timeline-dot green"></div>
++            <div class="timeline-content">
++                <h3>Perfect for couples, professionals & frequent diners</h3>
++                <p>A lifestyle membership that effectively pre-pays a portion of your monthly dining — transforming routine evenings into effortless luxury.</p>
++            </div>
+         </div>
+-      </div>
+-    </section>
++    </div>
++</div>
+ 
+-    <section class="society-section">
+-      <h2>Why Members Choose The Ochre Society</h2>
++<div class="gradient-divider"></div>
+ 
+-      <div class="society-benefits">
+-        <div class="benefit">
+-          <p>✔ Significant, predictable monthly savings
+-A fixed benefit is applied to every visit.
+-If you dine out even 2–4 times a month, your membership pays for itself — often many times over.</p>
+-        </div>
++<div class="story-philosophy">
++    <p class="philosophy-label"><span class="dash">—</span>MEMBERSHIP INCLUDES<span class="dash">—</span></p>
++    <h2>Your Exclusive Benefits</h2>
+ 
+-        <div class="benefit">
+-          <p>✔ The city’s finest bars and restaurants
+-No noise. No guesswork.
+-Just the top 100 venues selected for food, ambience, service, and consistency.</p>
++    <div class="philosophy-grid">
++        <div class="philosophy-item">
++            <h3>Dining Covered</h3>
++            <p>Up to your visit limit at elite partner venues</p>
+         </div>
+-
+-        <div class="benefit">
+-          <p>✔ A billing experience that simply disappears
+-No scanning. No redeeming.
+-Your benefit applies silently in the background.</p>
++        <div class="philosophy-item">
++            <h3>Chef's Tables</h3>
++            <p>Invitations to tasting journeys & private events</p>
+         </div>
+-
+-        <div class="benefit">
+-          <p>✔ You are recognised as a high-trust diner
+-Partner venues extend smoother hosting and exceptional service to Ochre Society members.</p>
++        <div class="philosophy-item">
++            <h3>Preferred Rates</h3>
++            <p>Exclusive Ochre Experiences at member pricing</p>
+         </div>
++    </div>
+ 
+-        <div class="benefit">
+-          <p>✔ Perfect for couples, professionals & frequent diners
+-A lifestyle membership that effectively pre-pays a portion of your monthly dining — transforming routine evenings into effortless luxury.</p>
+-        </div>
+-      </div>
+-    </section>
+-
+-    <section class="society-section">
+-      <h2>Your Membership Includes</h2>
+-      <ul class="society-list">
+-        <li>• Dining covered up to your visit limit</li>
+-        <li>• Access to elite partner venues</li>
+-        <li>• Invitations to chef’s tables & tasting journeys</li>
+-        <li>• Private Society-only events & previews</li>
+-        <li>• Preferred rates on exclusive Ochre Experiences</li>
+-      </ul>
+-
+-      <p class="society-sub">Membership is intentionally limited to preserve intimacy, privilege, and quality.</p>
+-    </section>
+-
+-    <section class="society-section">
+-      <h2>This Is Not a Discount Program</h2>
+-      <p class="society-sub">This is a new category.
+-A new lifestyle.
+-A new way to experience your city.</p>
+-
+-      <div class="society-closer">
+-        <p>The Ochre Society
+-Where you dine freely.
+-Where the bill is taken care of.
+-Where luxury becomes effortless.</p>
+-
+-        <p><strong>Join the waitlist — before the circle closes.</strong></p>
+-
+-        <p><a class="cn join-btn" href="#">Join the waitlist</a></p>
+-      </div>
+-    </section>
+-
+-  </div>
++    <p class="story-tagline" style="margin-top: 40px;">Membership is intentionally limited to preserve intimacy, privilege, and quality.</p>
++</div>
+ 
++<div class="story-experience">
++    <h2>This Is Not a Discount Program</h2>
++    <p>This is a new category. A new lifestyle. A new way to experience your city.</p>
++    <p style="margin-top: 30px; font-size: 18px;">The Ochre Society<br>
++    Where you dine freely.<br>
++    Where the bill is taken care of.<br>
++    Where luxury becomes effortless.</p>
++    <div class="experience-buttons">
++        <button class="cn visit-btn"><a href="#">JOIN THE WAITLIST</a></button>
++    </div>
+ </div>
+ 
+ {% endblock %}
+diff --git a/templates/story/story_page.html b/templates/story/story_page.html
+index 1208b1f..680d3bb 100644
+--- a/templates/story/story_page.html
++++ b/templates/story/story_page.html
+@@ -4,7 +4,6 @@
+ {% block content %}
+ 
+ <div class="story-page">
+-
+     <div class="story-header">
+         <p class="story-year"><span class="dash">—</span>SINCE 2023<span class="dash">—</span></p>
+         <h1>Our Story</h1>
+@@ -20,70 +19,62 @@
+ 
+             <p>We source the finest ingredients and employ sustainable practices throughout our production process. Quality isn't just a goal—it's our foundation, our promise, and our legacy.</p>
+         </div>
+-
+         <div class="story-image">
+             <div class="image-placeholder"></div>
+         </div>
+     </div>
+-
+ </div>
+ 
+-    <section class="story-philosophy story-journey">
+-        <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
+-        <h2>Inclusivity Over Exclusivity</h2>
+-
+-        <div class="philosophy-grid">
+-            <div class="philosophy-item">
+-                <div class="philosophy-number red">1</div>
+-                <h3>Accessible Excellence</h3>
+-                <p>We believe exceptional spirits should be enjoyed by everyone.</p>
+-            </div>
++<div class="gradient-divider"></div>
+ 
+-            <div class="philosophy-item">
+-                <div class="philosophy-number green">2</div>
+-                <h3>Authentic Innovation</h3>
+-                <p>We honor tradition while embracing modern techniques.</p>
+-            </div>
++<div class="story-philosophy">
++    <p class="philosophy-label"><span class="dash">—</span>OUR PHILOSOPHY<span class="dash">—</span></p>
++    <h2>Inclusivity Over Exclusivity</h2>
+ 
+-            <div class="philosophy-item">
+-                <div class="philosophy-number orange">3</div>
+-                <h3>Community First</h3>
+-                <p>Our success is measured by the connections we forge.</p>
+-            </div>
++    <div class="philosophy-grid">
++        <div class="philosophy-item">
++            <div class="philosophy-number red">1</div>
++            <h3>Accessible Excellence</h3>
++            <p>We believe exceptional spirits should be enjoyed by everyone, not reserved for the elite few. Quality without pretension is our promise.</p>
++        </div>
++        <div class="philosophy-item">
++            <div class="philosophy-number green">2</div>
++            <h3>Authentic Innovation</h3>
++            <p>We honor tradition while embracing modern techniques, creating spirits that respect the past while boldly defining the future.</p>
++        </div>
++        <div class="philosophy-item">
++            <div class="philosophy-number orange">3</div>
++            <h3>Community First</h3>
++            <p>Our success is measured by the connections we forge and the experiences we create together, not just the bottles we sell.</p>
+         </div>
+-    </section>
+-
+     </div>
+-
+-<div class="gradient-divider"></div>
++</div>
+ 
+ <div class="story-journey">
+     <h2>Our Journey</h2>
++
+     <div class="timeline">
+         <div class="timeline-item">
+-            <span class="timeline-dot red"></span>
++            <div class="timeline-dot red"></div>
+             <div class="timeline-content">
+-                <div class="timeline-year">2023</div>
+                 <h3>The Beginning</h3>
+-                <p>Ochre Spirits launches in Goa with our first collection.</p>
++                <p>Ochre Spirits launches in Goa with our first collection of craft spirits, introducing Saffron Gin, Peach & Cherry Vodka, and our signature flavored rums.</p>
+             </div>
+         </div>
+ 
+         <div class="timeline-item">
+-            <span class="timeline-dot green"></span>
++            <div class="timeline-dot green"></div>
+             <div class="timeline-content">
+-                <div class="timeline-year">2024</div>
+                 <h3>Expansion</h3>
+-                <p>New flavors & India’s first brand tasting room.</p>
++                <p>Introduction of new flavors including Rose & Raspberry Gin, Kiwi & Pear Gin, and fruit-forward vodkas. Opening of India's first-ever brand tasting room.</p>
+             </div>
+         </div>
+ 
+         <div class="timeline-item">
+-            <span class="timeline-dot orange"></span>
++            <div class="timeline-dot orange"></div>
+             <div class="timeline-content">
+-                <div class="timeline-year">2025</div>
+                 <h3>Innovation Continues</h3>
+-                <p>Launch of premium Saffron Vodka.</p>
++                <p>Launch of premium Saffron Vodka and continued commitment to creating spirits that transcend boundaries and celebrate tradition with a modern twist.</p>
+             </div>
+         </div>
+     </div>
+@@ -92,7 +83,6 @@
+ <div class="story-experience">
+     <h2>Experience Our Story</h2>
+     <p>Visit our tasting room in Goa to immerse yourself in the world of Ochre Spirits</p>
+-
+     <div class="experience-buttons">
+         <button class="cn visit-btn"><a href="#">VISIT US</a></button>
+         <button class="cn explore-btn"><a href="{% url 'collections_app:collections_index' %}">EXPLORE COLLECTIONS</a></button>
